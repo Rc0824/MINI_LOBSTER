@@ -1,0 +1,19 @@
+# 敏感的登入狀態與 Cookie (絕・對・不・能・上・傳!!)
+chatgpt_state.json
+
+# Python 虛擬環境
+venv/
+env/
+.env
+
+# Python 快取與編譯檔案
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE 與編輯器設定檔
+.vscode/
+.idea/
+
+# 執行日誌檔與執行時期檔案
+*.log
