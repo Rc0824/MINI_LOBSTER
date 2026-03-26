@@ -70,13 +70,19 @@ async def interactive_chat():
                     
                 current_text = await reply_elements[-1].inner_text()
                 
-                if current_text == last_text and current_text.strip() != "":
-                    stable_time += 1
-                else:
-                    stable_time = 0
-                    last_text = current_text
+                # 雙重鎖定防護
+                stop_btn = await page.query_selector('button[data-testid="stop-button"]')
                 
-                # 給它 3 秒鐘的網路緩衝容錯率，是最穩定的黃金秒數
+                if stop_btn:
+                    stable_time = 0 # 只要停止按鈕還在畫面上，就必定還沒結束
+                    last_text = current_text
+                else:
+                    if current_text == last_text and current_text.strip() != "":
+                        stable_time += 1
+                    else:
+                        stable_time = 0
+                        last_text = current_text
+                
                 if stable_time >= 3:
                     print("\n🤖 ChatGPT：")
                     print(current_text)

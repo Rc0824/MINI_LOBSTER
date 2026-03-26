@@ -1,6 +1,11 @@
 # 敏感的登入狀態與 Cookie (絕・對・不・能・上・傳!!)
 chatgpt_state.json
 
+# 小龍蝦執行時期的暫存檔
+temp_lobster.py
+temp_out.txt
+temp_clipboard*.png
+
 # Python 虛擬環境
 venv/
 env/
