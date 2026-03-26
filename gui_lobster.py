@@ -11,7 +11,7 @@ from playwright.async_api import async_playwright
 
 import glob
 def cleanup_temp_files():
-    files = ["temp_lobster.py", "temp_out.txt"] + glob.glob("temp_clipboard*.png")
+    files = ["temp_lobster.py", "temp_out.txt", "temp_lobster.ps1"] + glob.glob("temp_clipboard*.png")
     for f in files:
         if os.path.exists(f):
             try:
@@ -93,9 +93,9 @@ def extract_action(text, tag):
             
         if tag == "[ACTION:CMD]":
             lines = code_str.split('\n')
-            if lines and lines[0].strip().lower() in ['cmd', 'bat', 'bash', 'powershell', 'sh']:
+            if lines and lines[0].strip().lower() in ['cmd', 'bat', 'bash', 'powershell', 'sh', 'ps1']:
                 lines = lines[1:]
-            return " & ".join([line.strip() for line in lines if line.strip()])
+            return "\n".join([line for line in lines])
             
         return code_str
     return ""
@@ -159,6 +159,13 @@ class LobsterGUI:
         )
         self.attach_btn.pack(side=tk.LEFT, padx=(0,8))
 
+        self.cancel_img_btn = tk.Button(
+            input_frame, text="✖ 取消", font=("Segoe UI", 10, "bold"),
+            bg=BG_PANEL, fg=ACCENT_RED, activebackground="#444466",
+            relief=tk.FLAT, padx=8, pady=4, command=self._cancel_image
+        )
+        # 初始不顯示
+
         self.input_entry = tk.Entry(
             input_frame, font=("Segoe UI", 12), bg=BG_INPUT, fg=FG_TEXT,
             insertbackground=FG_TEXT, relief=tk.FLAT, borderwidth=0
@@ -178,6 +185,12 @@ class LobsterGUI:
         )
         self.send_btn.pack(side=tk.RIGHT)
     
+    def _cancel_image(self):
+        if self.image_path:
+            self.image_path = None
+            self._append("\n🗑️ 您已取消剛剛附加的圖片！", "dim")
+            self.cancel_img_btn.pack_forget()
+
     def _attach_image(self):
         file_path = filedialog.askopenfilename(
             title="選擇圖片",
@@ -187,6 +200,7 @@ class LobsterGUI:
             self.image_path = file_path
             self._append(f"\n📎 已成功載入圖片: {os.path.basename(file_path)} (這張圖片將會跟著下一次對話發送出去)", "dim")
             self._append_image(file_path)
+            self.cancel_img_btn.pack(before=self.input_entry, side=tk.LEFT, padx=(0,8))
             
     def _on_paste(self, event):
         import uuid
@@ -206,6 +220,7 @@ class LobsterGUI:
                 self.image_path = temp_path
                 self._append(f"\n📎 您已直接從剪貼簿截取圖片！(將會跟著下一次對話發送出去)", "dim")
                 self._append_image(temp_path)
+                self.cancel_img_btn.pack(before=self.input_entry, side=tk.LEFT, padx=(0,8))
                 return "break" # 取消預設的文字貼上行爲
         except Exception as e:
             self._append(f"\n❌ 從剪貼簿讀取圖片失敗: {e}", "system")
@@ -271,24 +286,23 @@ class LobsterGUI:
                 await self.browser.close()
                 return
             
-            prompt_setup = """我們來玩一個遊戲。你現在是一個名為「小龍蝦」的本機自動化 Agent。
-你可以控制我 Windows 的 Terminal (終端機) 以及執行 Python 程式碼。我會給你任務。
-你「每次」的回答都「必須」使用以下三種規定好的格式之一，不要給多餘的解釋或廢話：
+            prompt_setup = """我們來玩一個遊戲。你現在是一個名為「小龍蝦」的 Windows 自動化 Agent。
+你的核心本領是使用 PowerShell 控制我的電腦。我會給你任務。
+你「每次」的回答都「必須」使用以下三種規定好的格式之一，不要給多餘的解釋：
 
-1. 如果你想執行簡單的終端機指令：
+1. 預設且優先使用 PowerShell 指令 (用來尋找檔案、啟動程式、取得系統資訊等)：
 [ACTION:CMD]
-```cmd
-你的 Windows 指令
+```powershell
+你要執行的 PowerShell 指令
 ```
 
-2. 如果你需要執行複雜邏輯、控制滑鼠鍵盤 (pyautogui)、影像處理 (opencv/pillow)：
+2. 只有當使用者「明確要求」控制滑鼠、模擬鍵盤輸入時，才允許使用 Python 腳本：
 [ACTION:PYTHON]
 ```python
-你要執行的完整 Python 程式碼 (請把結果用 print 印出來)
+你要執行的完整 Python 程式碼 (請自行確認變數與 import)
 ```
-★ 極度重要警告 ★：如果你遇到需要控制滑鼠、打開軟體、截圖的任務，請絕對「不要」拒絕我說你做不到！我已經授權給你了！請直接使用 [ACTION:PYTHON] 產出 pyautogui 腳本！
 
-3. 如果任務已經達成：
+3. 如果任務已經達成，或是你想問我問題確認：
 [ACTION:DONE]
 你要對我說的話
 
@@ -325,6 +339,7 @@ class LobsterGUI:
         self.input_entry.configure(state=tk.DISABLED)
         self.send_btn.configure(state=tk.DISABLED)
         self.attach_btn.configure(state=tk.DISABLED)
+        self.cancel_img_btn.pack_forget()
         
         img_path = self.image_path
         self.image_path = None
@@ -407,15 +422,19 @@ class LobsterGUI:
                     if is_py:
                         with open("temp_lobster.py", "w", encoding="utf-8") as f:
                             f.write(code)
-                        cmd_to_run = "python temp_lobster.py > temp_out.txt 2>&1"
-                        subprocess.run(cmd_to_run, shell=True, timeout=30)
-                        with open("temp_out.txt", "r", encoding="utf-8", errors="replace") as f:
-                            output = f.read()
+                        cmd_list = ["python", "temp_lobster.py"]
+                        with open("temp_out.txt", "w", encoding="utf-8") as out_f:
+                            subprocess.run(cmd_list, stdout=out_f, stderr=subprocess.STDOUT, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
                     else:
-                        cmd_to_run = f"{code} > temp_out.txt 2>&1"
-                        subprocess.run(cmd_to_run, shell=True, timeout=15)
-                        with open("temp_out.txt", "r", encoding="cp950", errors="replace") as f:
-                            output = f.read()
+                        with open("temp_lobster.ps1", "w", encoding="utf-8-sig") as f:
+                            f.write(code)
+                        cmd_list = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "temp_lobster.ps1"]
+                        with open("temp_out.txt", "w", encoding="utf-8") as out_f:
+                            subprocess.run(cmd_list, stdout=out_f, stderr=subprocess.STDOUT, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+                            
+                    with open("temp_out.txt", "r", encoding="utf-8", errors="replace") as f:
+                        output = f.read()
+                        
                     if not output.strip():
                         output = "執行成功，沒有輸出任何文字。"
                 except subprocess.TimeoutExpired:

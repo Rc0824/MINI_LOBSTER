@@ -7,7 +7,7 @@ import atexit
 from playwright.async_api import async_playwright
 
 def cleanup_temp_files():
-    for f in ["temp_lobster.py", "temp_out.txt"]:
+    for f in ["temp_lobster.py", "temp_out.txt", "temp_lobster.ps1"]:
         if os.path.exists(f):
             try:
                 os.remove(f)
@@ -76,9 +76,9 @@ def extract_action(text, tag):
             
         if tag == "[ACTION:CMD]":
             lines = code_str.split('\n')
-            if lines and lines[0].strip().lower() in ['cmd', 'bat', 'bash', 'powershell', 'sh']:
+            if lines and lines[0].strip().lower() in ['cmd', 'bat', 'bash', 'powershell', 'sh', 'ps1']:
                 lines = lines[1:]
-            return " & ".join([line.strip() for line in lines if line.strip()])
+            return "\n".join([line for line in lines])
             
         return code_str
     return ""
@@ -108,22 +108,21 @@ async def mini_lobster():
             return
 
         # 核心：給 ChatGPT 的系統大腦設定 (System Prompt)
-        prompt_setup = """我們來玩一個遊戲。你現在是一個名為「小龍蝦」的本機自動化 Agent。
-你可以控制我 Windows 的 Terminal (終端機) 以及執行 Python 程式碼。我會給你任務。
-你「每次」的回答都「必須」使用以下三種規定好的格式之一，不要給多餘的解釋或廢話：
+        prompt_setup = """我們來玩一個遊戲。你現在是一個名為「小龍蝦」的 Windows 自動化 Agent。
+你的核心本領是使用 PowerShell 控制我的電腦。我會給你任務。
+你「每次」的回答都「必須」使用以下三種規定好的格式之一，不要給多餘的解釋：
 
-1. 如果你想執行簡單的終端機指令（讀寫檔案、呼叫內建工具等）：
+1. 預設且優先使用 PowerShell 指令 (用來尋找檔案、啟動程式、取得系統資訊等)：
 [ACTION:CMD]
-```cmd
-你的 Windows 指令
+```powershell
+你要執行的 PowerShell 指令
 ```
 
-2. 如果你需要執行複雜邏輯、控制滑鼠鍵盤 (pyautogui)、影像處理 (opencv/pillow)：
+2. 只有當使用者「明確要求」控制滑鼠、模擬鍵盤輸入時，才允許使用 Python 腳本：
 [ACTION:PYTHON]
 ```python
-你要執行的完整 Python 程式碼 (請把結果用 print 印出來)
+你要執行的完整 Python 程式碼 (請自行確認變數與 import)
 ```
-★ 極度重要警告 ★：如果你遇到需要控制滑鼠、打開軟體、截圖的任務，請絕對「不要」拒絕我說你做不到，也「不要」建議我自己手動寫腳本！我已經授權給你了！請直接在第一時間霸氣地使用 [ACTION:PYTHON] 把 pyautogui 的爬蟲或控制腳本產出給我，我的電腦會自動去跑你的程式碼！
 
 3. 如果任務已經達成，或是你想問我問題確認：
 [ACTION:DONE]
@@ -144,7 +143,7 @@ async def mini_lobster():
                 continue
                 
             # 第一棒交給龍蝦開始推論
-            prompt = f"任務來了：{goal}。請開始思考，並根據任務難度自由使用 [ACTION:CMD]、[ACTION:PYTHON] 或 [ACTION:DONE] 格式。"
+            prompt = f"任務來了：{goal}。請開始思考，請優先使用 [ACTION:CMD] (PowerShell) 完成任務，若完成請回覆 [ACTION:DONE]。"
             
             # 開始 ReAct (推論與行動) 無限迴圈
             while True:
@@ -185,20 +184,22 @@ async def mini_lobster():
                     prompt = f"系統：使用者拒絕了這個 {action_type}，請改用其他方法或回覆 [ACTION:DONE]。"
                 else:
                     try:
-                        # 避免 Windows Pipe 繼承導致開啟 GUI 程式 (如 mspaint) 時永久卡死
-                        # 我們改用檔案重導向 (> temp_out.txt) 來捕捉輸出
+                        # 把腳本存成對應的實體檔案並使用標準 API 執行，避免 shell=True 的逸出字元地雷與 Window Pipe 卡死
                         if is_py:
                             with open("temp_lobster.py", "w", encoding="utf-8") as f:
                                 f.write(code)
-                            cmd_to_run = "python temp_lobster.py > temp_out.txt 2>&1"
-                            subprocess.run(cmd_to_run, shell=True, timeout=30)
-                            with open("temp_out.txt", "r", encoding="utf-8", errors="replace") as f:
-                                output = f.read()
+                            cmd_list = ["python", "temp_lobster.py"]
+                            with open("temp_out.txt", "w", encoding="utf-8") as out_f:
+                                subprocess.run(cmd_list, stdout=out_f, stderr=subprocess.STDOUT, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
                         else:
-                            cmd_to_run = f"{code} > temp_out.txt 2>&1"
-                            subprocess.run(cmd_to_run, shell=True, timeout=15)
-                            with open("temp_out.txt", "r", encoding="cp950", errors="replace") as f:
-                                output = f.read()
+                            with open("temp_lobster.ps1", "w", encoding="utf-8-sig") as f:
+                                f.write(code)
+                            cmd_list = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "temp_lobster.ps1"]
+                            with open("temp_out.txt", "w", encoding="utf-8") as out_f:
+                                subprocess.run(cmd_list, stdout=out_f, stderr=subprocess.STDOUT, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
+                                
+                        with open("temp_out.txt", "r", encoding="utf-8", errors="replace") as f:
+                            output = f.read()
                                 
                         if not output.strip():
                             output = "執行成功，沒有輸出任何文字。"
