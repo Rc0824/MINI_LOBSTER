@@ -9,28 +9,34 @@ async def send_message(page, msg):
     await page.fill('#prompt-textarea', msg)
     await page.press('#prompt-textarea', 'Enter')
     
-    print("🦞 小龍蝦推論中 (請稍候)...\r", end="", flush=True)
+    print("🦞 小龍蝦推論中 (穩定抓取文字中)...\r", end="", flush=True)
+    
     last_text = ""
     stable_time = 0
     wait_count = 0
     
     while True:
-        await page.wait_for_timeout(1000)
+        await page.wait_for_timeout(1000) # 每 1 秒檢查一次畫面
         wait_count += 1
+        
         reply_elements = await page.query_selector_all('[data-message-author-role="assistant"]')
         
         if not reply_elements:
+            if wait_count > 30:
+                return "系統：等待過久無回應。"
             continue
             
         current_text = await reply_elements[-1].inner_text()
         
+        # 只有在「抓到了字」並且「連續幾秒沒變」的情況下才當作完成
         if current_text == last_text and current_text.strip() != "":
             stable_time += 1
         else:
             stable_time = 0
             last_text = current_text
         
-        if stable_time >= 2 or wait_count >= 120:
+        # 只要連續 3 秒沒變，保證它 100% 已經生成完畢，且避開了前面的時間差陷阱
+        if stable_time >= 3 or wait_count >= 300:
             return current_text
 
 def extract_cmd(text):

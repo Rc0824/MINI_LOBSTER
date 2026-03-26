@@ -51,46 +51,40 @@ async def interactive_chat():
             await page.fill('#prompt-textarea', user_input)
             await page.press('#prompt-textarea', 'Enter')
             
-            print("🤖 ChatGPT 腦力激盪中 (自動等待輸出直到完成)...\r", end="", flush=True)
+            print("🤖 ChatGPT 腦力激盪中 (動態穩定抓取中)...\r", end="", flush=True)
             
-            # 建立動態等待機制：當回覆文字超過 2 秒沒變時，當作它生成完畢
             last_text = ""
             stable_time = 0
             wait_count = 0
             
             while True:
-                await page.wait_for_timeout(1000) # 每 1 秒檢查一次畫面
+                await page.wait_for_timeout(1000)
                 wait_count += 1
                 
                 reply_elements = await page.query_selector_all('[data-message-author-role="assistant"]')
-                
                 if not reply_elements:
-                    if wait_count > 15: # 如果等了 15 秒連黑對話框都沒生出來
-                        print("\n❌ 等待太久，可能連線卡住了。")
+                    if wait_count > 30:
+                        print("\n❌ 等待太久連線失敗。")
                         break
                     continue
                     
                 current_text = await reply_elements[-1].inner_text()
                 
-                # 如果有抓到文字，且目前的文字長度與 1 秒前一樣
                 if current_text == last_text and current_text.strip() != "":
                     stable_time += 1
                 else:
-                    stable_time = 0      # 文字還在改變，重置穩定計時器
+                    stable_time = 0
                     last_text = current_text
                 
-                # 如果連續 2 秒都沒有新文字蹦出來，就認定它打完字了
-                if stable_time >= 2:
+                # 給它 3 秒鐘的網路緩衝容錯率，是最穩定的黃金秒數
+                if stable_time >= 3:
                     print("\n🤖 ChatGPT：")
                     print(current_text)
                     print("-" * 50)
                     break
                     
-                # 防呆：最多只等 2 分鐘，避免因為奇怪的 bug 無限卡住
-                if wait_count >= 120:
-                    print("\n❌ 生成時間過長 (超過兩分鐘)，強制中斷。")
-                    print("目前輸出的片段：")
-                    print(current_text)
+                if wait_count >= 300:
+                    print("\n❌ 生成時間過長 (超過五分鐘)，強制中斷。")
                     break
                 
         await browser.close()
